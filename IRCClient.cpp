@@ -42,6 +42,29 @@ int TCPConnect(char* hostName, char* ipAddress) {
     return socketFd;
 }
 
+void sendThreadFunc(int socketFd, string name) {
+    bool isExit = false;
+    char buff[1024];
+    string strToInput;
+    while(true) {
+        memset(buff, 0, sizeof(buff));
+        getline(cin, strToInput);
+        if(strToInput.compare("!e") == 0) {
+            isExit = true;
+        }
+        if(isExit) {
+            break;
+        }
+        string sendingStr = "PRIVMSG " + name + " :" + strToInput + "\r\n";
+        strcpy(buff, sendingStr.c_str());
+        if((send(socketFd, buff, strlen(buff), 0)) < 0) {
+            cout << "Fail to send" << endl;
+        }
+        
+    }
+    return;
+}
+
 void signUpICR(int socketFd, string channel) {
     char buff[1024];
     memset(buff, 0, sizeof(buff));
@@ -69,17 +92,6 @@ void signUpICR(int socketFd, string channel) {
 
 }
 
-void receive(int socketFd) {
-    char buff2[1024];
-    while(true) {
-        memset(buff2, 0, sizeof(buff2));
-        if((recv(socketFd, buff2, sizeof(buff2), 0)) < 0) {
-            cout << "Fail to receive" << endl;
-        }
-        cout << buff2 << endl;
-    }
-}
-
 bool isRecvBlock(string recvString) {
     string del = "PRIVMSG";
     size_t privmsgPos = recvString.find(del, 0);
@@ -97,8 +109,9 @@ int recvStringParsing(string recvString,string &nameToSend, string &messageRecei
     }
     privmsgPos += del.length();
     messageReceived = recvString.substr(privmsgPos, recvString.length()-privmsgPos);
-    messageReceived.pop_back(); // xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    messageReceived.pop_back(); // xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    while (messageReceived[messageReceived.length()-1] == '\n' || messageReceived[messageReceived.length()-1] == '\r') {
+        messageReceived.erase(messageReceived.length()-1);
+    }
     del = "!";
     size_t exclaPos = recvString.find(del, 0);
     nameToSend = recvString.substr(1, exclaPos-1);
@@ -121,13 +134,25 @@ int recvNumParsing(string &recvString,string &messageRecv) {
         }
     }
     if(isDigit == false) {
-        cout << "no";
         return 0;
     } else {
-        cout << "yes";
         return atoi(messageRecv.c_str());
     }
     
+}
+
+int recvMessageParsing(string recvString, string &messageReceived) {
+    string del = "PRIVMSG bot :";
+    size_t privmsgPos = recvString.find(del, 0);
+    if(privmsgPos == string::npos) {
+        return 0;
+    }
+    privmsgPos += del.length();
+    messageReceived = recvString.substr(privmsgPos, recvString.length()-privmsgPos);
+    while (messageReceived[messageReceived.length()-1] == '\n' || messageReceived[messageReceived.length()-1] == '\r') {
+        messageReceived.erase(messageReceived.length()-1);
+    }
+    return 1;
 }
 
 bool messageQuery(string &messageReceived, string &messageResponse, int socketFd, string name) {
@@ -227,7 +252,40 @@ bool messageQuery(string &messageReceived, string &messageResponse, int socketFd
         }
         return false;
     }
-    return true;
+    if(messageReceived.compare("!chat") == 0) {
+        cout << name << "加入了聊天室！" << endl;
+        bool isContinueChat = true;
+        char buffRec[1024];
+        int garbNum = -1;
+        
+        
+        thread sendThread(sendThreadFunc, socketFd, name);
+        while(isContinueChat) {
+            memset(buffRec, 0, sizeof(buffRec));
+            if((recv(socketFd, buffRec, sizeof(buffRec), 0)) < 0) {
+                cout << "Fail to receive" << endl;
+            }
+            string recvString = buffRec;
+            string messageReceived;
+            garbNum = recvMessageParsing(recvString, messageReceived);
+            if(garbNum == 0 ) {
+                continue;
+            }
+            
+            while (messageReceived[messageReceived.length()-1] == '\n' || messageReceived[messageReceived.length()-1] == '\r') {
+                messageReceived.erase(messageReceived.length()-1);
+            }
+            if(messageReceived.compare("!bye") == 0) {
+                cout << name << "離開了聊天室" << endl;
+                isContinueChat = false;
+                break;
+            }
+            cout << messageReceived << endl;
+        }
+        sendThread.join();
+        return false;
+    }
+    return false;
 }
 
 void sendString(int socketFd, string recvString) {
